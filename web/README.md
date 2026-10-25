@@ -1,32 +1,43 @@
-# React + TypeScript + Vite
+# Cameraman Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + Vite + TypeScript, Tailwind v4, shadcn/ui (dark by default), TanStack Query, Zustand, React Router.
 
-Currently, two official plugins are available:
+## Setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+pnpm install
+cp .env.example .env   # optional
+pnpm dev               # http://localhost:5173
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Scripts
+
+| Command          | Purpose                                  |
+| ---------------- | ---------------------------------------- |
+| `pnpm dev`       | Vite dev server                          |
+| `pnpm build`     | Typecheck + production build to `dist/`  |
+| `pnpm lint`      | ESLint                                   |
+| `pnpm typecheck` | `tsc -b --noEmit`                        |
+| `pnpm test`      | Vitest (watch); `pnpm test --run` for CI |
+
+## Environment
+
+| Var                 | Default                        | Meaning          |
+| ------------------- | ------------------------------ | ---------------- |
+| `VITE_API_BASE_URL` | `http://localhost:8080/api/v1` | Backend REST API |
+
+## Layout
+
+- `src/lib/api.ts` typed fetch client: bearer token, single-flight refresh on 401 (retry once), logout on refresh failure.
+- `src/stores/auth.ts` Zustand store (persisted to localStorage key `cameraman-auth`), `hasRole` (admin > operator > viewer).
+- `src/features/auth/actions.ts` login / register / logout.
+- `src/routes/` router + `RequireAuth` / `RequireRole` guards.
+- `src/components/ui/` shadcn/ui (add more with `pnpm dlx shadcn@latest add <name>`).
+- `src/components/layout/` app shell: collapsible sidebar, top bar, user menu, theme toggle.
+- `src/types/api.ts` API entity types (SPEC section 7).
+
+## Auth API contract assumed
+
+`POST /auth/login|register` -> `{ access_token, refresh_token, user }`;
+`POST /auth/refresh {refresh_token}` -> `{ access_token, refresh_token, user? }`;
+`POST /auth/logout {refresh_token}`. Adjust `src/types/api.ts` + `src/features/auth/actions.ts` if the backend differs.

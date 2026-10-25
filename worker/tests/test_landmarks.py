@@ -47,8 +47,8 @@ def test_thresholds_are_configurable():
     old = (0.4, 0.4, 0.2, 0.2)
     cand = (0.41, 0.4, 0.2, 0.2)
     assert decide(old, cand, 0.9).action == "none"
-    assert decide(old, cand, 0.9, drift_threshold=0.01).action == "recalibrate"
-    assert decide(old, cand, 0.6, drift_threshold=0.01, similarity_threshold=0.7).action != (
+    assert decide(old, cand, 0.9, drift_threshold=0.005).action == "recalibrate"
+    assert decide(old, cand, 0.6, drift_threshold=0.005, similarity_threshold=0.7).action != (
         "recalibrate"
     )
 

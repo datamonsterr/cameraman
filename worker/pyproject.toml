@@ -28,6 +28,7 @@ module-name = "cameraman_worker"
 testpaths = ["tests"]
 
 [tool.ruff]
+extend-exclude = ["examples"]
 line-length = 100
 target-version = "py312"
 
