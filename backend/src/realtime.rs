@@ -102,6 +102,8 @@ async fn auth_query(st: &AppState, q: &TokenQuery) -> AppResult<()> {
 
 type WsReq = Result<WebSocketUpgrade, axum::extract::ws::rejection::WebSocketUpgradeRejection>;
 
+// WS handlers return Response in both arms; the "large Err" lint is irrelevant here.
+#[allow(clippy::result_large_err)]
 async fn ws_events(
     State(st): State<AppState>,
     Query(q): Query<TokenQuery>,
@@ -117,6 +119,7 @@ async fn ws_events(
     Ok(ws.on_upgrade(move |s| pump(s, sub, false)))
 }
 
+#[allow(clippy::result_large_err)]
 async fn ws_stream(
     State(st): State<AppState>,
     Path(id): Path<Uuid>,
