@@ -9,7 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 WORKDIR /app
 COPY worker/pyproject.toml worker/uv.lock* ./
-RUN uv sync --frozen --no-dev || uv sync --no-dev
+# Include the `ml` extra (torch + ultralytics) so the worker can run real YOLO.
+# CPU by default; on a CUDA host the bundled wheels use the GPU (see compose).
+ARG WORKER_EXTRAS=ml
+RUN uv sync --frozen --no-dev --extra "$WORKER_EXTRAS" \
+    || uv sync --no-dev --extra "$WORKER_EXTRAS" \
+    || uv sync --no-dev
 COPY worker/ /app/
 RUN useradd -r -u 10002 app && mkdir -p /models /media && chown -R app /app /models /media
 USER app

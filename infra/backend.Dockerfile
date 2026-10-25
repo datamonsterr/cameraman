@@ -15,7 +15,8 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --release && cp target/release/cameraman /cameraman
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+# ffmpeg provides ffprobe, used by the RTSP connect validator.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && useradd -r -u 10001 app
 COPY --from=build /cameraman /usr/local/bin/cameraman
