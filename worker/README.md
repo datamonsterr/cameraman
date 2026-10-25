@@ -53,3 +53,25 @@ drift > threshold AND similarity >= threshold (EMA-smoothed). Low similarity wit
 and leaves the box. `landmark.contains` = intersection / smaller-box area >= `min_overlap`.
 Producing candidate boxes and similarity scores (appearance embedding) is the caller's job; feed them to
 `engine.landmarks[name].update(box, similarity, ts)`.
+
+## Runtime (`python -m cameraman_worker`)
+Implements `docs/runtime-protocol.md`. Env: `REDIS_URL`, `BACKEND_URL`, `WORKER_TOKEN`, `NODE_TYPES_PATH`,
+`MODEL_CACHE_DIR` (yolov8n.pt auto-downloads here), `LANDMARK_MODEL` (default `yolov8n`).
+- `bus.py` `RedisBus`/`FakeBus` (BRPOP `cameraman:runs:control`, HGETALL `cameraman:runs:desired`, PUBLISH
+  `cameraman:camera:<id>:frames`, SET `...:latest` TTL 30s, worker heartbeat). `ingest.py` `HttpIngest`/`FakeIngest`
+  (`X-Worker-Token`; `post_event`, `post_notification`, `post_calibration`, `post_health`).
+- `runtime.py` `Supervisor`: boot resync, `start`/`update` rebuild a run (keyed by `run_id`), `stop` tears down
+  (unknown id = no-op). Per camera at the camera node's fps: read, auto-calibrate, `GraphEngine.run_frame`, publish
+  JPEG (<=5 fps, <=100 kB), post actions (`email`/`notify` with recipients -> notification; any action -> `detection`
+  event). Capture failure -> health `offline` + exponential backoff (1..30s); code-block errors -> `system` warn
+  event (rate-limited), never fatal. Ingest/Redis errors are logged, never crash the loop.
+- Deterministic tests: no threads/sleeps in `Supervisor.tick(now)`; `run_frames(n, start, dt)` drives a fake clock.
+  `serve_forever` is only a thin real-time wrapper.
+
+## Landmark auto-calibration (FR-14, wired)
+Per camera with landmarks, each frame a detector (`get_model(LANDMARK_MODEL)`, conf 0.25, all classes) yields
+candidates. For each landmark the nearest-ish candidate (within 1.5x landmark size) with the best
+`max(IoU, appearance similarity)` is chosen; `appearance.py` (`hsv_histogram`, `similarity` = HSV histogram
+correlation in [0,1]) compares it to the landmark's reference crop (taken from the first frame, refreshed after each
+recalibration). `LandmarkTracker.update(box, sim, ts)` decides; on `recalibrate` the engine's box (what
+`landmark.get(name)` returns) moves and a `kind="calibration"` event is posted. Low similarity never moves the box.
