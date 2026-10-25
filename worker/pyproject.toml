@@ -1,0 +1,41 @@
+[project]
+name = "cameraman-worker"
+version = "0.1.0"
+authors = [
+    { name = "datamonsterr", email = "phamdat17092004@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "numpy>=2.5.4",
+    "opencv-python-headless>=5.0.0.93",
+    "pydantic>=2.14.1",
+    "redis>=8.1.0",
+]
+
+[project.optional-dependencies]
+ml = ["torch", "ultralytics"]
+
+[build-system]
+requires = ["uv_build>=0.13.3,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = "cameraman_worker"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
