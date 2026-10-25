@@ -64,21 +64,101 @@ export interface NormBox {
   h: number
 }
 
-export interface Landmark {
+/** Landmark as the API returns it; `box` may arrive as [x,y,w,h] or an object. */
+export type RawBox = [number, number, number, number] | NormBox
+
+export interface RawLandmark {
   id: string
   camera_id: string
   name: string
+  box: RawBox
+  polygon?: unknown | null
+  drift_threshold?: number
+  similarity_threshold?: number
+  created_at?: string
+  updated_at?: string
+}
+
+/** Landmark with `box` normalized to an object (see features/landmarks/geometry). */
+export interface Landmark extends Omit<RawLandmark, 'box'> {
   box: NormBox
-  polygon: unknown | null
-  drift_threshold: number
-  similarity_threshold: number
-  created_at: string
-  updated_at: string
+}
+
+export interface LandmarkInput {
+  camera_id: string
+  name: string
+  box: [number, number, number, number]
+  polygon?: unknown
+  drift_threshold?: number
+  similarity_threshold?: number
+}
+
+export type LandmarkPatch = Partial<Omit<LandmarkInput, 'camera_id'>>
+
+// ---- node registry -------------------------------------------------------
+
+export interface PortSpec {
+  id: string
+  type: string
+  /** Server default is true. */
+  required?: boolean
+}
+
+export interface JsonSchemaProp {
+  type?: string
+  title?: string
+  description?: string
+  format?: string
+  default?: unknown
+  minimum?: number
+  maximum?: number
+  items?: { type?: string; format?: string }
+}
+
+export interface ConfigSchema {
+  type?: string
+  required?: string[]
+  properties?: Record<string, JsonSchemaProp>
+}
+
+export interface NodeDescriptor {
+  inputs: PortSpec[]
+  outputs: PortSpec[]
+  config: ConfigSchema
+}
+
+export interface NodeType {
+  id: string
+  category: string
+  title: string
+  descriptor: NodeDescriptor
+}
+
+export interface NodeTypesResponse {
+  version?: number
+  node_types: NodeType[]
+}
+
+// ---- workflows -----------------------------------------------------------
+
+export interface GraphNode {
+  id: string
+  type: string
+  config: Record<string, unknown>
+  position?: { x: number; y: number }
+}
+
+export interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle: string
+  targetHandle: string
 }
 
 export interface WorkflowGraph {
-  nodes: unknown[]
-  edges: unknown[]
+  nodes: GraphNode[]
+  edges: GraphEdge[]
 }
 
 export interface Workflow {
@@ -87,10 +167,30 @@ export interface Workflow {
   description: string | null
   enabled: boolean
   active_version_id: string | null
+  active_version?: number | null
+  /** Active version graph; present on the detail view only. */
+  graph?: WorkflowGraph | null
   created_by: string | null
   created_at: string
   updated_at: string
 }
+
+export interface WorkflowVersion {
+  id: string
+  workflow_id: string
+  version: number
+  graph: WorkflowGraph
+  created_by: string | null
+  created_at: string
+}
+
+export interface CreateWorkflowRequest {
+  name: string
+  description?: string
+  graph: WorkflowGraph
+}
+
+export type UpdateWorkflowRequest = Partial<CreateWorkflowRequest>
 
 export type RunStatus = 'starting' | 'running' | 'stopped' | 'error'
 
@@ -103,6 +203,50 @@ export interface WorkflowRun {
   started_at: string
   stopped_at: string | null
 }
+
+/** One entry of a 422 `details` list from the graph validator. */
+export interface GraphIssue {
+  code: string
+  message: string
+  node_id?: string | null
+}
+
+// ---- settings ------------------------------------------------------------
+
+export interface SmtpSettings {
+  configured: boolean
+  host: string | null
+  port: number
+  username: string | null
+  has_secret: boolean
+  from_addr: string | null
+  use_tls: boolean
+  updated_at: string | null
+}
+
+export interface SmtpUpdate {
+  host: string
+  port: number
+  username?: string
+  /** Omit to keep the stored secret; "" clears it. */
+  password?: string
+  from_addr: string
+  use_tls: boolean
+}
+
+export interface AuditEntry {
+  id: number
+  actor_id: string | null
+  action: string
+  target: string | null
+  detail: unknown | null
+  created_at: string
+}
+
+// ---- live (websocket) ----------------------------------------------------
+
+/** Compact event as published on `cameraman:events` / forwarded by /ws/events. */
+export type LiveEvent = Partial<CameraEvent> & { kind: EventKind }
 
 export type EventKind = 'detection' | 'notification' | 'health' | 'calibration' | 'clip' | 'system'
 export type EventSeverity = 'info' | 'warn' | 'alert'

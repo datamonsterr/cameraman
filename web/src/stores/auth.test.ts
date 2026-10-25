@@ -63,11 +63,16 @@ describe('auth actions', () => {
     expect(useAuth.getState().accessToken).toBe('a1')
   })
 
-  it('register posts and stores the session', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(json(201, session))
+  it('register posts, then logs in to obtain the session', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(json(201, session.user))
+      .mockResolvedValueOnce(json(200, session))
     await register({ email: 'x@y.z', password: 'pw', display_name: 'X' })
     expect(String(vi.mocked(fetch).mock.calls[0][0])).toMatch(/\/auth\/register$/)
+    expect(String(vi.mocked(fetch).mock.calls[1][0])).toMatch(/\/auth\/login$/)
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[1][1]!.body as string)).toEqual({ email: 'x@y.z', password: 'pw' })
     expect(useAuth.getState().user?.id).toBe('u1')
+    expect(useAuth.getState().accessToken).toBe('a1')
   })
 
   it('logout calls /auth/logout with refresh token and clears state', async () => {

@@ -7,9 +7,10 @@ export async function login(req: LoginRequest): Promise<void> {
   useAuth.getState().setSession(res)
 }
 
+/** Backend register returns only the created user (no tokens), so sign in right after. */
 export async function register(req: RegisterRequest): Promise<void> {
-  const res = await api.post<AuthResponse>('/auth/register', req, { auth: false })
-  useAuth.getState().setSession(res)
+  await api.post('/auth/register', req, { auth: false })
+  await login({ email: req.email, password: req.password })
 }
 
 /** Clears local state always; server revoke is best-effort. */

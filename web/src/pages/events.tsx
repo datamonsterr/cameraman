@@ -7,6 +7,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useCameras } from '@/features/cameras/api'
 import { useEvents, type EventFilters, type TimeRange } from '@/features/events/api'
 import { EventList } from '@/features/events/recent-events'
+import { matchesFilter, mergeEvents } from '@/features/live/events'
+import { useEventStream } from '@/features/live/use-event-stream'
 
 const PAGE = 50
 const KINDS = ['detection', 'notification', 'health', 'calibration', 'clip', 'system'] as const
@@ -22,7 +24,12 @@ export function EventsPage() {
   const [filters, setFilters] = useState<EventFilters>({ range: '24h' })
   const [limit, setLimit] = useState(PAGE)
   const { data: cameras } = useCameras()
-  const { data: events, isLoading, isFetching, error } = useEvents(filters, limit, { refetchInterval: 10_000 })
+  const { data: fetched, isLoading, isFetching, error } = useEvents(filters, limit, { refetchInterval: 10_000 })
+  const { events: liveEvents, status: liveStatus } = useEventStream()
+  const events = useMemo(
+    () => (fetched ? mergeEvents(liveEvents.filter((e) => matchesFilter(e, filters)), fetched, Math.max(limit, fetched.length)) : fetched),
+    [liveEvents, fetched, filters, limit],
+  )
   const names = useMemo(() => new Map((cameras ?? []).map((c) => [c.id, c.name])), [cameras])
 
   function set(patch: Partial<EventFilters>) {
@@ -32,7 +39,16 @@ export function EventsPage() {
 
   return (
     <>
-      <PageHeader title="Events" description="Timeline of detections, notifications and health." />
+      <PageHeader
+        title="Events"
+        description="Timeline of detections, notifications and health."
+        actions={
+          <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]" title={`Live feed ${liveStatus}`}>
+            <span className={`size-1.5 rounded-full ${liveStatus === 'open' ? 'bg-emerald-500' : 'bg-zinc-500'}`} />
+            {liveStatus === 'open' ? 'Live' : 'Polling'}
+          </span>
+        }
+      />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <NativeSelect aria-label="Kind" value={filters.kind ?? ''} onChange={(e) => set({ kind: e.target.value as EventFilters['kind'] })}>
           <option value="">All kinds</option>
@@ -77,7 +93,7 @@ export function EventsPage() {
           <div className="rounded-lg border px-3">
             <EventList events={events} cameraNames={names} />
           </div>
-          {events.length >= limit && (
+          {(fetched?.length ?? 0) >= limit && (
             <div className="mt-3 flex justify-center">
               <Button size="sm" variant="outline" disabled={isFetching} onClick={() => setLimit((l) => l + PAGE)}>
                 Load more

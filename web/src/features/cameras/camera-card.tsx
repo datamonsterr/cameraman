@@ -8,10 +8,12 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { Camera } from '@/types/api'
 import { useDeleteCamera } from './api'
 import { CameraFormDialog } from './camera-form-dialog'
-import { SnapshotImage } from './snapshot-image'
+import { LiveFrame } from './live-frame'
+import { LiveToggle } from './live-toggle'
 import { StatusBadge } from './status-badge'
 
 export function CameraCard({ camera, canOperate }: { camera: Camera; canOperate: boolean }) {
+  const [live, setLive] = useState(false)
   const [editing, setEditing] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const del = useDeleteCamera()
@@ -28,9 +30,12 @@ export function CameraCard({ camera, canOperate }: { camera: Camera; canOperate:
 
   return (
     <Card className="gap-0 overflow-hidden py-0" data-testid="camera-card">
-      <Link to={`/cameras/${camera.id}`} aria-label={`Open ${camera.name}`}>
-        <SnapshotImage cameraId={camera.id} alt={`${camera.name} snapshot`} enabled={camera.status === 'online'} />
-      </Link>
+      <div className="relative">
+        <Link to={`/cameras/${camera.id}`} aria-label={`Open ${camera.name}`} className="block">
+          <LiveFrame cameraId={camera.id} alt={`${camera.name} snapshot`} enabled={camera.status === 'online'} live={live} />
+        </Link>
+        {camera.status === 'online' && <LiveToggle live={live} onChange={setLive} label={camera.name} />}
+      </div>
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <div className="min-w-0">
           <Link to={`/cameras/${camera.id}`} className="block truncate text-sm font-medium hover:underline">

@@ -1,16 +1,31 @@
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Radio } from 'lucide-react'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/page-header'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCamera, useStatusHistory } from '@/features/cameras/api'
-import { SnapshotImage } from '@/features/cameras/snapshot-image'
+import { LiveFrame } from '@/features/cameras/live-frame'
 import { StatusBadge } from '@/features/cameras/status-badge'
+import { useLandmarks } from '@/features/landmarks/api'
+import { LandmarkOverlay } from '@/features/landmarks/landmark-overlay'
+import { LandmarkPanel, useCalibrationFlash } from '@/features/landmarks/landmark-panel'
+import { useCanOperate } from '@/hooks/use-can-operate'
 import { formatDateTime, timeAgo } from '@/lib/time'
+import type { NormBox } from '@/types/api'
+
+const EMPTY: never[] = []
 
 export function CameraDetailPage() {
   const { id } = useParams()
+  const canOperate = useCanOperate()
   const { data: cam, isLoading, error } = useCamera(id)
   const history = useStatusHistory(id)
+  const { data: landmarks = EMPTY } = useLandmarks(id)
+  const highlight = useCalibrationFlash(landmarks)
+  const [live, setLive] = useState(true)
+  const [drawing, setDrawing] = useState(false)
+  const [draft, setDraft] = useState<NormBox | null>(null)
 
   return (
     <>
@@ -25,12 +40,55 @@ export function CameraDetailPage() {
         </p>
       ) : (
         <>
-          <PageHeader title={cam.name} description={`${cam.host}:${cam.port}${cam.rtsp_path}`} actions={<StatusBadge status={cam.status} />} />
+          <PageHeader
+            title={cam.name}
+            description={`${cam.host}:${cam.port}${cam.rtsp_path}`}
+            actions={
+              <div className="flex items-center gap-2">
+                <Button size="xs" variant={live ? 'secondary' : 'outline'} aria-pressed={live} onClick={() => setLive((v) => !v)}>
+                  <Radio />
+                  Live
+                </Button>
+                <StatusBadge status={cam.status} />
+              </div>
+            }
+          />
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             <div className="overflow-hidden rounded-lg border">
-              <SnapshotImage cameraId={cam.id} alt={`${cam.name} live`} enabled={cam.status === 'online'} intervalMs={2000} />
+              <LiveFrame
+                cameraId={cam.id}
+                alt={`${cam.name} live`}
+                live={live}
+                enabled={cam.status === 'online'}
+                intervalMs={2000}
+                aspect={cam.width && cam.height ? cam.width / cam.height : 16 / 9}
+              >
+                <LandmarkOverlay
+                  landmarks={landmarks}
+                  drawing={drawing && canOperate && !draft}
+                  draft={draft}
+                  highlight={highlight}
+                  onDraw={setDraft}
+                />
+              </LiveFrame>
             </div>
             <div className="grid content-start gap-4">
+              <LandmarkPanel
+                cameraId={cam.id}
+                landmarks={landmarks}
+                canOperate={canOperate}
+                drawing={drawing}
+                onDrawingChange={(d) => {
+                  setDrawing(d)
+                  if (!d) setDraft(null)
+                }}
+                draft={draft}
+                onDraftDone={() => {
+                  setDraft(null)
+                  setDrawing(false)
+                }}
+                highlight={highlight}
+              />
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-lg border p-3 text-xs">
                 <dt className="text-muted-foreground">Vendor</dt>
                 <dd>{cam.vendor ?? '-'}</dd>

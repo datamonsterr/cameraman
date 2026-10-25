@@ -4,7 +4,10 @@ import { Link } from 'react-router-dom'
 import { EmptyState, PageHeader } from '@/components/layout/page-header'
 import { Button } from '@/components/ui/button'
 import { useCameras } from '@/features/cameras/api'
-import { SnapshotImage } from '@/features/cameras/snapshot-image'
+import { LiveFrame } from '@/features/cameras/live-frame'
+import { LiveToggle } from '@/features/cameras/live-toggle'
+import { mergeEvents } from '@/features/live/events'
+import { useEventStream } from '@/features/live/use-event-stream'
 import { countByStatus } from '@/features/cameras/status'
 import { StatusBadge } from '@/features/cameras/status-badge'
 import { useEvents } from '@/features/events/api'
@@ -25,7 +28,17 @@ const STATUSES: CameraStatus[] = ['online', 'connecting', 'discovered', 'offline
 export function DashboardPage() {
   const [layout, setLayout] = useState<Layout>(4)
   const { data: cameras = [] } = useCameras()
-  const { data: events = [] } = useEvents({}, 10, { refetchInterval: 10_000 })
+  const { data: fetched = [] } = useEvents({}, 10, { refetchInterval: 10_000 })
+  const { events: liveEvents } = useEventStream()
+  const events = useMemo(() => mergeEvents(liveEvents, fetched, 10), [liveEvents, fetched])
+  const [liveIds, setLiveIds] = useState<Set<string>>(new Set())
+  const toggleLive = (id: string, on: boolean) =>
+    setLiveIds((s) => {
+      const n = new Set(s)
+      if (on) n.add(id)
+      else n.delete(id)
+      return n
+    })
   const online = useMemo(() => cameras.filter((c) => c.status === 'online'), [cameras])
   const counts = useMemo(() => countByStatus(cameras), [cameras])
   const names = useMemo(() => new Map(cameras.map((c) => [c.id, c.name])), [cameras])
@@ -59,10 +72,13 @@ export function DashboardPage() {
           {shown.length > 0 ? (
             <div className={cn('grid gap-2', COLS[layout])}>
               {shown.map((c) => (
-                <Link key={c.id} to={`/cameras/${c.id}`} className="relative block overflow-hidden rounded-lg border">
-                  <SnapshotImage cameraId={c.id} alt={`${c.name} live`} />
-                  <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">{c.name}</span>
-                </Link>
+                <div key={c.id} className="relative overflow-hidden rounded-lg border">
+                  <Link to={`/cameras/${c.id}`} className="block">
+                    <LiveFrame cameraId={c.id} alt={`${c.name} live`} live={liveIds.has(c.id)} />
+                  </Link>
+                  <LiveToggle live={liveIds.has(c.id)} onChange={(v) => toggleLive(c.id, v)} label={c.name} />
+                  <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[11px] text-white">{c.name}</span>
+                </div>
               ))}
             </div>
           ) : (

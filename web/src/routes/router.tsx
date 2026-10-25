@@ -6,10 +6,11 @@ import { DashboardPage } from '@/pages/dashboard'
 import { CamerasPage } from '@/pages/cameras'
 import { CameraDetailPage } from '@/pages/camera-detail'
 import { WorkflowsPage } from '@/pages/workflows'
+import { WorkflowEditorPage } from '@/pages/workflow-editor'
 import { EventsPage } from '@/pages/events'
 import { SettingsPage } from '@/pages/settings'
 import { NotFoundPage } from '@/pages/not-found'
-import { RequireAuth } from './guards'
+import { RequireAuth, RequireRole } from './guards'
 
 export const appRoutes = [
   { path: '/login', element: <LoginPage /> },
@@ -24,6 +25,8 @@ export const appRoutes = [
           { path: 'cameras', element: <CamerasPage /> },
           { path: 'cameras/:id', element: <CameraDetailPage /> },
           { path: 'workflows', element: <WorkflowsPage /> },
+          { element: <RequireRole roles={['operator']} />, children: [{ path: 'workflows/new', element: <WorkflowEditorPage /> }] },
+          { path: 'workflows/:id', element: <WorkflowEditorPage /> },
           { path: 'events', element: <EventsPage /> },
           { path: 'settings', element: <SettingsPage /> },
           { path: '*', element: <NotFoundPage /> },
