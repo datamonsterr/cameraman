@@ -6,12 +6,16 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
+    camera::{set_status, CameraStatus},
     error::{AppError, AppResult},
     events::{fetch_detail, EventKind},
     extract::WorkerAuth,
     mail::EmailMessage,
-    AppState, Services,
+    media, AppState, Services,
 };
+
+/// A camera reported offline for at least this long raises an `alert` event.
+pub const PROLONGED_OFFLINE_SECS: i64 = 300;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -46,6 +50,8 @@ pub struct EventIn {
     #[serde(default)]
     pub detections: Vec<DetectionIn>,
     pub snapshot: Option<SnapshotIn>,
+    /// Base64 JPEG; stored under `${MEDIA_DIR}/snapshots/` and takes precedence over `snapshot`.
+    pub snapshot_jpeg: Option<String>,
 }
 
 fn map_fk(e: sqlx::Error) -> AppError {
@@ -63,7 +69,7 @@ async fn ingest_event(
     Extension(svc): Extension<Services>,
     Json(req): Json<EventIn>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    let severity = req.severity.unwrap_or_else(|| "info".into());
+    let severity = req.severity.clone().unwrap_or_else(|| "info".into());
     if !matches!(severity.as_str(), "info" | "warn" | "alert") {
         return Err(AppError::Unprocessable(
             "severity must be info, warn or alert".into(),
@@ -76,9 +82,78 @@ async fn ingest_event(
             ));
         }
     }
+    // A health report without camera or state is stored as a plain event.
+    let health = match (req.kind, req.camera_id, health_state(req.payload.as_ref())?) {
+        (EventKind::Health, Some(cam), Some(state)) => Some((cam, state)),
+        _ => None,
+    };
+    // Write the JPEG first; remove it again if the DB work fails.
+    let stored = match &req.snapshot_jpeg {
+        Some(b64) => {
+            let bytes = media::decode_jpeg(b64)?;
+            let sid = Uuid::new_v4();
+            let rel = media::save_jpeg(&st.config.media_dir, sid, &bytes).await?;
+            Some((sid, rel))
+        }
+        None => None,
+    };
+    let id = match store_event(
+        &st,
+        &req,
+        &severity,
+        stored.as_ref().map(|(i, p)| (*i, p.as_str())),
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            if let Some((_, rel)) = &stored {
+                if let Some(full) = media::resolve(&st.config.media_dir, rel) {
+                    let _ = tokio::fs::remove_file(full).await;
+                }
+            }
+            return Err(e);
+        }
+    };
+    publish(&st, &svc, id).await;
+    if let Some((cam, state)) = health {
+        handle_health(&st, &svc, cam, state).await?;
+    }
+    Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
+}
+
+async fn publish(st: &AppState, svc: &Services, id: i64) {
+    match fetch_detail(&st.pool, id).await {
+        Ok(detail) => {
+            if let Err(e) = svc.events.publish(&detail).await {
+                tracing::warn!(error = %e, event_id = id, "event fan-out failed");
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, event_id = id, "event reload for fan-out failed"),
+    }
+}
+
+/// Insert the event, detections, snapshot and kind-specific rows atomically.
+async fn store_event(
+    st: &AppState,
+    req: &EventIn,
+    severity: &str,
+    stored: Option<(Uuid, &str)>,
+) -> AppResult<i64> {
     let mut tx = st.pool.begin().await?;
-    let snapshot_id: Option<Uuid> = match &req.snapshot {
-        Some(s) => Some(
+    let snapshot_id: Option<Uuid> = match (stored, &req.snapshot) {
+        (Some((sid, rel)), _) => Some(
+            sqlx::query_scalar(
+                "INSERT INTO snapshots (id, camera_id, path) VALUES ($1, $2, $3) RETURNING id",
+            )
+            .bind(sid)
+            .bind(req.camera_id)
+            .bind(rel)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(map_fk)?,
+        ),
+        (None, Some(s)) => Some(
             sqlx::query_scalar(
                 "INSERT INTO snapshots (camera_id, path, width, height) \
                  VALUES ($1, $2, $3, $4) RETURNING id",
@@ -91,7 +166,7 @@ async fn ingest_event(
             .await
             .map_err(map_fk)?,
         ),
-        None => None,
+        (None, None) => None,
     };
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO events (kind, camera_id, workflow_id, run_id, severity, message, payload, snapshot_id) \
@@ -101,7 +176,7 @@ async fn ingest_event(
     .bind(req.camera_id)
     .bind(req.workflow_id)
     .bind(req.run_id)
-    .bind(&severity)
+    .bind(severity)
     .bind(&req.message)
     .bind(&req.payload)
     .bind(snapshot_id)
@@ -121,12 +196,124 @@ async fn ingest_event(
         .execute(&mut *tx)
         .await?;
     }
-    tx.commit().await?;
-    let detail = fetch_detail(&st.pool, id).await?;
-    if let Err(e) = svc.events.publish(&detail).await {
-        tracing::warn!(error = %e, event_id = id, "event fan-out failed");
+    if req.kind == EventKind::Calibration {
+        store_calibration(&mut tx, req).await?;
     }
-    Ok((StatusCode::CREATED, Json(json!({ "id": id }))))
+    tx.commit().await?;
+    Ok(id)
+}
+
+/// `payload{landmark,old_box,new_box,similarity}` -> `landmark_calibrations` row; the
+/// landmark's current box follows `new_box` so the next run starts from it.
+async fn store_calibration(tx: &mut sqlx::PgConnection, req: &EventIn) -> AppResult<()> {
+    let bad = || {
+        AppError::Unprocessable(
+            "calibration needs camera_id and payload{landmark,old_box,new_box}".into(),
+        )
+    };
+    let cam = req.camera_id.ok_or_else(bad)?;
+    let p = req.payload.as_ref().ok_or_else(bad)?;
+    let name = p.get("landmark").and_then(Value::as_str).ok_or_else(bad)?;
+    let old_box = p.get("old_box").filter(|v| !v.is_null()).ok_or_else(bad)?;
+    let new_box = p.get("new_box").filter(|v| !v.is_null()).ok_or_else(bad)?;
+    let similarity = p
+        .get("similarity")
+        .and_then(Value::as_f64)
+        .map(|f| f as f32);
+    let lid: Uuid =
+        sqlx::query_scalar("SELECT id FROM landmarks WHERE camera_id = $1 AND name = $2")
+            .bind(cam)
+            .bind(name)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| AppError::Unprocessable("landmark not found for camera".into()))?;
+    sqlx::query(
+        "INSERT INTO landmark_calibrations (landmark_id, old_box, new_box, similarity) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(lid)
+    .bind(old_box)
+    .bind(new_box)
+    .bind(similarity)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("UPDATE landmarks SET box = $2, updated_at = now() WHERE id = $1")
+        .bind(lid)
+        .bind(new_box)
+        .execute(&mut *tx)
+        .await?;
+    Ok(())
+}
+
+fn health_state(payload: Option<&Value>) -> AppResult<Option<CameraStatus>> {
+    match payload.and_then(|p| p.get("state")).and_then(Value::as_str) {
+        None => Ok(None),
+        Some("online") => Ok(Some(CameraStatus::Online)),
+        Some("offline") => Ok(Some(CameraStatus::Offline)),
+        Some("error") => Ok(Some(CameraStatus::Error)),
+        Some(_) => Err(AppError::Unprocessable(
+            "health payload.state must be online, offline or error".into(),
+        )),
+    }
+}
+
+/// Apply a health report: update status + history on change, and raise one `alert`
+/// event once a camera has stayed offline for `PROLONGED_OFFLINE_SECS`.
+async fn handle_health(
+    st: &AppState,
+    svc: &Services,
+    cam: Uuid,
+    state: CameraStatus,
+) -> AppResult<()> {
+    let cur: CameraStatus = sqlx::query_scalar("SELECT status FROM cameras WHERE id = $1")
+        .bind(cam)
+        .fetch_optional(&st.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("camera not found".into()))?;
+    if cur != state {
+        set_status(&st.pool, cam, state, None).await?;
+    }
+    if state != CameraStatus::Offline {
+        return Ok(());
+    }
+    // Start of the current offline stretch = first offline row after the last non-offline one.
+    let since: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+        "SELECT MIN(created_at) FROM camera_status_history WHERE camera_id = $1 \
+         AND status = 'offline' AND id > COALESCE((SELECT MAX(id) FROM camera_status_history \
+         WHERE camera_id = $1 AND status <> 'offline'), 0)",
+    )
+    .bind(cam)
+    .fetch_one(&st.pool)
+    .await?;
+    let Some(since) = since else { return Ok(()) };
+    if (chrono::Utc::now() - since).num_seconds() < PROLONGED_OFFLINE_SECS {
+        return Ok(());
+    }
+    let already: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM events WHERE camera_id = $1 AND kind = 'health' \
+         AND severity = 'alert' AND created_at >= $2)",
+    )
+    .bind(cam)
+    .bind(since)
+    .fetch_one(&st.pool)
+    .await?;
+    if already {
+        return Ok(());
+    }
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO events (kind, camera_id, severity, message, payload) \
+         VALUES ('health', $1, 'alert', $2, $3) RETURNING id",
+    )
+    .bind(cam)
+    .bind(format!(
+        "camera offline for over {} minutes",
+        PROLONGED_OFFLINE_SECS / 60
+    ))
+    .bind(json!({"state": "offline", "prolonged": true, "since": since}))
+    .fetch_one(&st.pool)
+    .await?;
+    publish(st, svc, id).await;
+    Ok(())
 }
 
 #[derive(Deserialize)]

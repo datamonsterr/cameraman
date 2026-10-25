@@ -75,6 +75,8 @@ pub struct WorkflowRun {
 pub enum RunAction {
     Start,
     Stop,
+    /// Re-send a changed graph for an already open run.
+    Update,
 }
 
 /// Signal telling the worker to start/stop a workflow run.
@@ -86,13 +88,13 @@ pub struct RunSignal {
     pub version_id: Option<Uuid>,
 }
 
-/// Seam for the worker control channel (Redis wiring is a later task).
+/// Seam for the worker control channel (`runctl::RedisRunControl` is the real impl).
 #[async_trait]
 pub trait RunControl: Send + Sync {
     async fn signal(&self, sig: RunSignal) -> Result<(), String>;
 }
 
-/// Real default for now: log only.
+/// No-op fallback when Redis is not configured: log only.
 #[derive(Debug, Default)]
 pub struct LogRunControl;
 
@@ -266,6 +268,7 @@ pub struct UpdateReq {
 async fn update(
     OperatorUser(actor): OperatorUser,
     State(st): State<AppState>,
+    Extension(svc): Extension<Services>,
     Path(id): Path<Uuid>,
     Json(req): Json<UpdateReq>,
 ) -> AppResult<Json<Workflow>> {
@@ -287,10 +290,35 @@ async fn update(
     .bind(&description)
     .execute(&mut *tx)
     .await?;
-    if let Some(g) = &req.graph {
-        add_version(&mut tx, id, g, actor.id).await?;
+    let new_version = match &req.graph {
+        Some(g) => Some(add_version(&mut tx, id, g, actor.id).await?),
+        None => None,
+    };
+    // An enabled workflow restarts its open run(s) on the new graph.
+    let mut updated_runs: Vec<Uuid> = Vec::new();
+    if let (Some(vid), true) = (new_version, cur.enabled) {
+        updated_runs = sqlx::query_scalar(
+            "UPDATE workflow_runs SET version_id = $2 \
+             WHERE workflow_id = $1 AND status IN ('starting', 'running') RETURNING id",
+        )
+        .bind(id)
+        .bind(vid)
+        .fetch_all(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
+    for run_id in updated_runs {
+        signal(
+            &svc,
+            RunSignal {
+                action: RunAction::Update,
+                workflow_id: id,
+                run_id: Some(run_id),
+                version_id: new_version,
+            },
+        )
+        .await;
+    }
     audit_soft(
         &st.pool,
         Some(actor.id),

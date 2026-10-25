@@ -9,11 +9,15 @@ pub mod error;
 pub mod events;
 pub mod extract;
 pub mod ingest;
+pub mod landmark;
 pub mod mail;
+pub mod media;
 pub mod models;
 pub mod password;
+pub mod realtime;
 pub mod registry;
 pub mod rtsp;
+pub mod runctl;
 pub mod tokens;
 pub mod workflow;
 
@@ -53,15 +57,16 @@ pub struct AppState {
 pub struct Services {
     pub probe: Arc<dyn Probe>,
     pub validator: Arc<dyn RtspValidator>,
-    /// Worker start/stop signalling (stub until Redis is wired).
+    /// Worker start/stop signalling (`runctl::RedisRunControl` when Redis is configured).
     pub run_control: Arc<dyn RunControl>,
-    /// Event fan-out (stub until Redis/WS is wired).
+    /// Event fan-out (`realtime::RedisEventSink` when Redis is configured).
     pub events: Arc<dyn EventSink>,
     pub mailer: Arc<dyn Mailer>,
 }
 
 impl Services {
-    /// Real LAN probe + ffprobe validator.
+    /// Real LAN probe + ffprobe validator; run control and events are log-only
+    /// (no-op fallback). See [`Services::wired`] for the Redis-backed pair.
     pub fn real() -> Self {
         Self {
             probe: Arc::new(RealProbe::default()),
@@ -70,6 +75,26 @@ impl Services {
             events: Arc::new(LogEventSink),
             mailer: Arc::new(SmtpMailer),
         }
+    }
+}
+
+impl Services {
+    /// `real()` plus Redis run control and event fan-out when `config.redis_url` is set.
+    pub fn wired(state: &AppState) -> Self {
+        let mut svc = Self::real();
+        let url = state.config.redis_url.trim();
+        if url.is_empty() {
+            return svc;
+        }
+        match runctl::RedisRunControl::new(url, state.pool.clone(), state.config.camera_enc_key) {
+            Ok(rc) => svc.run_control = Arc::new(rc),
+            Err(e) => tracing::warn!(error = %e, "redis run control disabled"),
+        }
+        match realtime::RedisEventSink::new(url) {
+            Ok(sink) => svc.events = Arc::new(sink),
+            Err(e) => tracing::warn!(error = %e, "redis event fan-out disabled"),
+        }
+        svc
     }
 }
 
@@ -142,7 +167,8 @@ async fn list_audit(
 
 /// Build the application router (no port binding; usable from tests).
 pub fn app(state: AppState) -> Router {
-    app_with(state, Services::real())
+    let services = Services::wired(&state);
+    app_with(state, services)
 }
 
 /// Like [`app`] but with injected network collaborators (fakes in tests).
@@ -152,7 +178,13 @@ pub fn app_with(state: AppState, services: Services) -> Router {
         .route("/me", get(me))
         .route("/audit", get(list_audit))
         .nest("/auth", auth::router())
-        .nest("/cameras", camera::router())
+        .nest(
+            "/cameras",
+            camera::router().merge(realtime::camera_router()),
+        )
+        .merge(realtime::router())
+        .nest("/landmarks", landmark::router())
+        .nest("/snapshots", media::router())
         .nest("/node-types", registry::router())
         .nest("/workflows", workflow::router())
         .nest("/events", events::router())

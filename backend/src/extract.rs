@@ -41,17 +41,23 @@ impl FromRequestParts<AppState> for AuthUser {
             .strip_prefix("Bearer ")
             .or_else(|| header.strip_prefix("bearer "))
             .ok_or_else(|| AppError::Unauthorized("missing bearer token".into()))?;
-        let claims = decode_access(&state.config.jwt_secret, token)?;
-        let user: Option<User> = sqlx::query_as(
-            "SELECT id, email, display_name, role, is_active, created_at FROM users WHERE id = $1",
-        )
-        .bind(claims.sub)
-        .fetch_optional(&state.pool)
-        .await?;
-        match user {
-            Some(u) if u.is_active => Ok(AuthUser(u)),
-            _ => Err(AppError::Unauthorized("invalid or expired token".into())),
-        }
+        user_from_token(state, token).await.map(AuthUser)
+    }
+}
+
+/// Validate an access token and load the *current* user (role/active from the DB).
+/// Shared by the bearer extractor and query-token endpoints (WebSockets).
+pub async fn user_from_token(state: &AppState, token: &str) -> Result<User, AppError> {
+    let claims = decode_access(&state.config.jwt_secret, token)?;
+    let user: Option<User> = sqlx::query_as(
+        "SELECT id, email, display_name, role, is_active, created_at FROM users WHERE id = $1",
+    )
+    .bind(claims.sub)
+    .fetch_optional(&state.pool)
+    .await?;
+    match user {
+        Some(u) if u.is_active => Ok(u),
+        _ => Err(AppError::Unauthorized("invalid or expired token".into())),
     }
 }
 

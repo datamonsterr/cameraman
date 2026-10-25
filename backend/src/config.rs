@@ -17,6 +17,8 @@ pub struct Config {
     pub camera_enc_key: [u8; 32],
     /// Shared secret the worker presents in `X-Worker-Token`; ingest is disabled when unset.
     pub worker_token: Option<String>,
+    /// Root directory for stored media (snapshots under `snapshots/`).
+    pub media_dir: String,
 }
 
 fn var(name: &str) -> Option<String> {
@@ -46,6 +48,7 @@ impl Config {
                 .unwrap_or(false),
             cors_origins: var("CORS_ORIGINS").unwrap_or_else(|| "*".into()),
             worker_token: var("WORKER_TOKEN"),
+            media_dir: var("MEDIA_DIR").unwrap_or_else(|| "/media".into()),
             camera_enc_key: match var("CAMERA_ENC_KEY") {
                 Some(k) => crate::crypto::parse_key(&k)?,
                 None => {
@@ -74,6 +77,7 @@ impl Config {
             cors_origins: "*".into(),
             camera_enc_key: crate::crypto::dev_key(),
             worker_token: Some("test-worker-token".into()),
+            media_dir: "/media".into(),
         }
     }
 }

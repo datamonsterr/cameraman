@@ -6,13 +6,15 @@ edition = "2021"
 [dependencies]
 argon2 = "0.6.0"
 async-trait = "0.1.92"
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["ws"] }
 base64 = "0.23.1"
 chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", features = ["serde"] }
+futures-util = "0.3.34"
 jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "ring", "webpki-roots"] }
 rand = "0.10.3"
+redis = { version = "1", features = ["tokio-comp", "aio"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
@@ -27,4 +29,5 @@ uuid = { version = "1.29.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 http-body-util = "0.1.5"
+tokio-tungstenite = "0.30.0"
 tower = { version = "0.5.3", features = ["util"] }

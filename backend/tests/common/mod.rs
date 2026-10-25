@@ -89,7 +89,17 @@ async fn token(app: &Router, email: &str) -> String {
     l["access_token"].as_str().unwrap().to_string()
 }
 
+/// Redis for integration tests: `REDIS_URL`, else the local test instance.
+pub fn redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6399".into())
+}
+
 pub async fn ctx_with(pool: PgPool, mailer: FakeMailer) -> Ctx {
+    ctx_cfg(pool, mailer, |_| {}).await
+}
+
+/// Like `ctx_with` but lets the test tweak the config (redis_url, media_dir, ...).
+pub async fn ctx_cfg(pool: PgPool, mailer: FakeMailer, tweak: impl FnOnce(&mut Config)) -> Ctx {
     let run_control = Arc::new(FakeRunControl::default());
     let events = Arc::new(FakeEventSink::default());
     let mailer = Arc::new(mailer);
@@ -99,13 +109,53 @@ pub async fn ctx_with(pool: PgPool, mailer: FakeMailer) -> Ctx {
         mailer: mailer.clone(),
         ..Services::real()
     };
+    let mut config = Config::for_test();
+    tweak(&mut config);
     let app = app_with(
         AppState {
             pool: pool.clone(),
-            config: Arc::new(Config::for_test()),
+            config: Arc::new(config),
         },
         services,
     );
+    finish(app, pool, run_control, events, mailer).await
+}
+
+/// Real Redis-backed run control + event sink (`app` / `Services::wired`), with
+/// `redis_url` and a private `media_dir` set. The fakes in `Ctx` stay empty.
+pub async fn ctx_wired(pool: PgPool, media_dir: &str) -> Ctx {
+    let mut config = Config::for_test();
+    config.redis_url = redis_url();
+    config.media_dir = media_dir.to_string();
+    let app = cameraman::app(AppState {
+        pool: pool.clone(),
+        config: Arc::new(config),
+    });
+    finish(
+        app,
+        pool,
+        Arc::default(),
+        Arc::default(),
+        Arc::new(FakeMailer::default()),
+    )
+    .await
+}
+
+/// Serve the app on an ephemeral port for WebSocket clients.
+pub async fn serve(app: Router) -> std::net::SocketAddr {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = l.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
+    addr
+}
+
+async fn finish(
+    app: Router,
+    pool: PgPool,
+    run_control: Arc<FakeRunControl>,
+    events: Arc<FakeEventSink>,
+    mailer: Arc<FakeMailer>,
+) -> Ctx {
     let admin = token(&app, "admin@example.com").await; // first user = admin
     let viewer = token(&app, "viewer@example.com").await;
     let operator = token(&app, "op@example.com").await;
