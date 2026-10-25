@@ -30,6 +30,7 @@ fn services(v: Result<StreamMeta, ValidateError>) -> Services {
     Services {
         probe: Arc::new(FakeProbe::lan_fixture()),
         validator: Arc::new(FakeValidator(v)),
+        ..Services::real()
     }
 }
 

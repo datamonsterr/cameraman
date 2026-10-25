@@ -3,13 +3,19 @@ pub mod auth;
 pub mod camera;
 pub mod config;
 pub mod crypto;
+pub mod device;
 pub mod discovery;
 pub mod error;
+pub mod events;
 pub mod extract;
+pub mod ingest;
+pub mod mail;
 pub mod models;
 pub mod password;
+pub mod registry;
 pub mod rtsp;
 pub mod tokens;
+pub mod workflow;
 
 use std::sync::Arc;
 
@@ -22,7 +28,9 @@ use axum::{
 use config::Config;
 use discovery::{Probe, RealProbe};
 use error::AppResult;
+use events::{EventSink, LogEventSink};
 use extract::{AdminUser, AuthUser};
+use mail::{Mailer, SmtpMailer};
 use models::{AuditEntry, User};
 use rtsp::{FfprobeValidator, RtspValidator};
 use serde::Deserialize;
@@ -32,6 +40,7 @@ use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
+use workflow::{LogRunControl, RunControl};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -44,6 +53,11 @@ pub struct AppState {
 pub struct Services {
     pub probe: Arc<dyn Probe>,
     pub validator: Arc<dyn RtspValidator>,
+    /// Worker start/stop signalling (stub until Redis is wired).
+    pub run_control: Arc<dyn RunControl>,
+    /// Event fan-out (stub until Redis/WS is wired).
+    pub events: Arc<dyn EventSink>,
+    pub mailer: Arc<dyn Mailer>,
 }
 
 impl Services {
@@ -52,6 +66,9 @@ impl Services {
         Self {
             probe: Arc::new(RealProbe::default()),
             validator: Arc::new(FfprobeValidator::default()),
+            run_control: Arc::new(LogRunControl),
+            events: Arc::new(LogEventSink),
+            mailer: Arc::new(SmtpMailer),
         }
     }
 }
@@ -135,7 +152,13 @@ pub fn app_with(state: AppState, services: Services) -> Router {
         .route("/me", get(me))
         .route("/audit", get(list_audit))
         .nest("/auth", auth::router())
-        .nest("/cameras", camera::router());
+        .nest("/cameras", camera::router())
+        .nest("/node-types", registry::router())
+        .nest("/workflows", workflow::router())
+        .nest("/events", events::router())
+        .nest("/ingest", ingest::router())
+        .nest("/settings", mail::router())
+        .nest("/devices", device::router());
     let layer_cors = cors(&state.config.cors_origins);
     Router::new()
         .route("/health", get(health))
@@ -146,8 +169,9 @@ pub fn app_with(state: AppState, services: Services) -> Router {
         .with_state(state)
 }
 
-/// Startup seeding (admin only; cameras/workflows belong to later tasks).
+/// Startup seeding: node-type registry always; admin only when `SEED_ON_START`.
 pub async fn seed(state: &AppState) -> AppResult<()> {
+    registry::seed_node_types(&state.pool).await?;
     let c = &state.config;
     if !c.seed_on_start {
         return Ok(());

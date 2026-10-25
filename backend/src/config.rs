@@ -15,6 +15,8 @@ pub struct Config {
     pub cors_origins: String,
     /// 32-byte key for RTSP credential encryption at rest.
     pub camera_enc_key: [u8; 32],
+    /// Shared secret the worker presents in `X-Worker-Token`; ingest is disabled when unset.
+    pub worker_token: Option<String>,
 }
 
 fn var(name: &str) -> Option<String> {
@@ -43,6 +45,7 @@ impl Config {
                 .map(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes"))
                 .unwrap_or(false),
             cors_origins: var("CORS_ORIGINS").unwrap_or_else(|| "*".into()),
+            worker_token: var("WORKER_TOKEN"),
             camera_enc_key: match var("CAMERA_ENC_KEY") {
                 Some(k) => crate::crypto::parse_key(&k)?,
                 None => {
@@ -70,6 +73,7 @@ impl Config {
             seed_on_start: false,
             cors_origins: "*".into(),
             camera_enc_key: crate::crypto::dev_key(),
+            worker_token: Some("test-worker-token".into()),
         }
     }
 }

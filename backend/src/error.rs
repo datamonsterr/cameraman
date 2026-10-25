@@ -19,6 +19,9 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     Unprocessable(String),
+    /// 422 carrying structured details (e.g. graph validation issues).
+    #[error("{0}")]
+    Invalid(String, serde_json::Value),
     #[error("internal error")]
     Internal(String),
 }
@@ -31,7 +34,7 @@ impl AppError {
             AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
             AppError::Conflict(_) => StatusCode::CONFLICT,
-            AppError::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            AppError::Unprocessable(_) | AppError::Invalid(..) => StatusCode::UNPROCESSABLE_ENTITY,
             AppError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -43,7 +46,7 @@ impl AppError {
             AppError::Forbidden(_) => "forbidden",
             AppError::NotFound(_) => "not_found",
             AppError::Conflict(_) => "conflict",
-            AppError::Unprocessable(_) => "unprocessable",
+            AppError::Unprocessable(_) | AppError::Invalid(..) => "unprocessable",
             AppError::Internal(_) => "internal",
         }
     }
@@ -54,7 +57,10 @@ impl IntoResponse for AppError {
         if let AppError::Internal(detail) = &self {
             tracing::error!(%detail, "internal error");
         }
-        let body = json!({ "error": self.code(), "message": self.to_string() });
+        let mut body = json!({ "error": self.code(), "message": self.to_string() });
+        if let AppError::Invalid(_, details) = &self {
+            body["details"] = details.clone();
+        }
         (self.status(), Json(body)).into_response()
     }
 }

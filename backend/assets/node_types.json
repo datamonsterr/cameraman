@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "node_types": [
+    {
+      "id": "camera",
+      "category": "source",
+      "title": "Camera",
+      "descriptor": {
+        "inputs": [],
+        "outputs": [{ "id": "frames", "type": "frame" }],
+        "config": {
+          "type": "object",
+          "required": ["camera_id"],
+          "properties": {
+            "camera_id": { "type": "string", "format": "uuid", "title": "Camera" },
+            "fps": { "type": "integer", "minimum": 1, "maximum": 30, "default": 10, "title": "Target FPS" }
+          }
+        }
+      }
+    },
+    {
+      "id": "codeblock",
+      "category": "process",
+      "title": "Code Block (Python)",
+      "descriptor": {
+        "inputs": [{ "id": "frames", "type": "frame" }],
+        "outputs": [
+          { "id": "result", "type": "object" },
+          { "id": "actions", "type": "action" }
+        ],
+        "config": {
+          "type": "object",
+          "required": ["code"],
+          "properties": {
+            "code": { "type": "string", "format": "python", "title": "Python code" },
+            "model": { "type": "string", "default": "yolov8n", "title": "Default model" }
+          }
+        }
+      }
+    },
+    {
+      "id": "email",
+      "category": "action",
+      "title": "Email Notification",
+      "descriptor": {
+        "inputs": [{ "id": "trigger", "type": "action" }],
+        "outputs": [],
+        "config": {
+          "type": "object",
+          "required": ["to", "subject"],
+          "properties": {
+            "to": { "type": "array", "items": { "type": "string", "format": "email" }, "title": "Recipients" },
+            "subject": { "type": "string", "title": "Subject", "description": "Supports {{var}} templating from upstream output" },
+            "body": { "type": "string", "title": "Body", "description": "Supports {{var}} templating" },
+            "cooldown_secs": { "type": "integer", "default": 60, "title": "Min seconds between sends" }
+          }
+        }
+      }
+    }
+  ]
+}

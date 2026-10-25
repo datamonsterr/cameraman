@@ -74,3 +74,32 @@ macro_rules! role_extractor {
 }
 role_extractor!(OperatorUser, Role::Operator);
 role_extractor!(AdminUser, Role::Admin);
+
+/// Internal caller (the worker): shared secret in `X-Worker-Token`.
+/// Rejected with 401 when missing, wrong, or when no `WORKER_TOKEN` is configured.
+pub struct WorkerAuth;
+
+impl FromRequestParts<AppState> for WorkerAuth {
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, AppError> {
+        let given = parts
+            .headers
+            .get("x-worker-token")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        match state.config.worker_token.as_deref() {
+            Some(expected)
+                if !expected.is_empty() && ct_eq(expected.as_bytes(), given.as_bytes()) =>
+            {
+                Ok(WorkerAuth)
+            }
+            _ => Err(AppError::Unauthorized("invalid worker token".into())),
+        }
+    }
+}
+
+/// Length-leaking but otherwise constant-time comparison.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
