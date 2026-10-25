@@ -39,10 +39,20 @@ services:
       SEED_ON_START: ${SEED_ON_START:-true}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-phamdat17092004@gmail.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+      WORKER_TOKEN: ${WORKER_TOKEN:-dev-worker-token-change-me}
+      CAMERA_ENC_KEY: ${CAMERA_ENC_KEY:-}
+      MEDIA_DIR: /media
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+    volumes:
+      - media:/media
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
@@ -57,6 +67,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-cameraman}:${POSTGRES_PASSWORD:-cameraman}@postgres:5432/${POSTGRES_DB:-cameraman}
       REDIS_URL: redis://redis:6379
       BACKEND_URL: http://backend:8080
+      WORKER_TOKEN: ${WORKER_TOKEN:-dev-worker-token-change-me}
       MODEL_CACHE_DIR: /models
       CODEBLOCK_CPU_SECONDS: ${CODEBLOCK_CPU_SECONDS:-5}
       CODEBLOCK_MEM_MB: ${CODEBLOCK_MEM_MB:-1024}
