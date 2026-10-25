@@ -1,0 +1,98 @@
+name: Deploy
+
+# CD: on green main, build images and deploy each service. Each job is guarded by
+# its required secret so the pipeline no-ops cleanly until infra is provisioned.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard
+        id: guard
+        run: echo "ok=${{ secrets.RAILWAY_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.guard.outputs.ok == 'true'
+        name: Install Railway CLI
+        run: npm i -g @railway/cli
+      - if: steps.guard.outputs.ok == 'true'
+        name: Deploy backend service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service backend --ci
+      - if: steps.guard.outputs.ok != 'true'
+        run: echo "RAILWAY_TOKEN not set; skipping backend deploy."
+
+  deploy-worker:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard
+        id: guard
+        run: echo "ok=${{ secrets.RAILWAY_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.guard.outputs.ok == 'true'
+        run: npm i -g @railway/cli
+      - if: steps.guard.outputs.ok == 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service worker --ci
+      - if: steps.guard.outputs.ok != 'true'
+        run: echo "RAILWAY_TOKEN not set; skipping worker deploy."
+
+  deploy-web:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults: { run: { working-directory: web } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard
+        id: guard
+        run: echo "ok=${{ secrets.VERCEL_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.guard.outputs.ok == 'true'
+        run: npm i -g vercel
+      - if: steps.guard.outputs.ok == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          vercel build --prod --token="$VERCEL_TOKEN"
+          vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+      - if: steps.guard.outputs.ok != 'true'
+        run: echo "VERCEL_TOKEN not set; skipping web deploy."
+
+  publish-mobile-update:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: mobile } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard
+        id: guard
+        run: echo "ok=${{ secrets.EXPO_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+      - if: steps.guard.outputs.ok == 'true'
+        uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - if: steps.guard.outputs.ok == 'true'
+        uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - if: steps.guard.outputs.ok == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.guard.outputs.ok == 'true'
+        name: EAS Update (OTA)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npm i -g eas-cli
+          eas update --branch production --message "${{ github.event.head_commit.message }}" --non-interactive
+      - if: steps.guard.outputs.ok != 'true'
+        run: echo "EXPO_TOKEN not set; skipping mobile OTA update."
