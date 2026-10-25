@@ -25,6 +25,8 @@ export interface RequestOptions {
   /** Attach bearer + auto-refresh on 401. Default true; false for public endpoints. */
   auth?: boolean
   signal?: AbortSignal
+  /** 'blob' returns the raw body (e.g. JPEG snapshots) instead of parsed JSON. */
+  responseType?: 'json' | 'blob'
 }
 
 async function parse(res: Response): Promise<unknown> {
@@ -50,7 +52,7 @@ function toError(res: Response, body: unknown): ApiError {
 
 function send(path: string, opts: RequestOptions, token: string | null): Promise<Response> {
   const headers = new Headers()
-  headers.set('Accept', 'application/json')
+  headers.set('Accept', opts.responseType === 'blob' ? 'image/*' : 'application/json')
   if (opts.body !== undefined) headers.set('Content-Type', 'application/json')
   if (opts.auth !== false && token) headers.set('Authorization', `Bearer ${token}`)
   return fetch(`${apiBaseUrl()}${path}`, {
@@ -95,6 +97,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
     if (!token) throw toError(res, await parse(res))
     res = await send(path, opts, token)
   }
+  if (res.ok && opts.responseType === 'blob') return (await res.blob()) as T
   const body = await parse(res)
   if (!res.ok) throw toError(res, body)
   return body as T
@@ -104,6 +107,8 @@ export const api = {
   get: <T>(path: string, opts?: Omit<RequestOptions, 'method' | 'body'>) => request<T>(path, { ...opts, method: 'GET' }),
   post: <T = void>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(path, { ...opts, method: 'POST', body }),
+  blob: (path: string, opts?: Omit<RequestOptions, 'method' | 'body' | 'responseType'>) =>
+    request<Blob>(path, { ...opts, method: 'GET', responseType: 'blob' }),
   put: <T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(path, { ...opts, method: 'PUT', body }),
   patch: <T>(path: string, body?: unknown, opts?: Omit<RequestOptions, 'method' | 'body'>) =>

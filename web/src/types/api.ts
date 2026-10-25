@@ -45,6 +45,7 @@ export interface Camera {
   port: number
   rtsp_path: string
   rtsp_username: string | null
+  has_credentials?: boolean
   transport: 'tcp' | 'udp'
   status: CameraStatus
   status_reason: string | null
@@ -117,6 +118,55 @@ export interface CameraEvent {
   payload: unknown | null
   snapshot_id: string | null
   created_at: string
+}
+
+export interface Candidate {
+  host: string
+  port: number
+  vendor?: string | null
+  paths: string[]
+  requires_auth: boolean
+  source: string
+}
+
+export interface ScanResponse {
+  cidr?: string
+  candidates: Candidate[]
+}
+
+export interface CreateCameraRequest {
+  name: string
+  host: string
+  port?: number
+  rtsp_path?: string
+  rtsp_username?: string
+  rtsp_password?: string
+  transport?: 'tcp' | 'udp'
+  vendor?: string
+}
+
+export type UpdateCameraRequest = Partial<CreateCameraRequest>
+
+export interface ConnectRequest {
+  username?: string
+  password?: string
+}
+
+export interface StatusHistory {
+  id: number
+  status: CameraStatus
+  reason: string | null
+  created_at: string
+}
+
+export interface Detection {
+  id: number
+  event_id: number | null
+  camera_id: string | null
+  label: string
+  confidence: number
+  box?: NormBox | null
+  created_at?: string
 }
 
 export interface ApiErrorBody {

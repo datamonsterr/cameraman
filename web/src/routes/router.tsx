@@ -4,6 +4,7 @@ import { LoginPage } from '@/pages/login'
 import { RegisterPage } from '@/pages/register'
 import { DashboardPage } from '@/pages/dashboard'
 import { CamerasPage } from '@/pages/cameras'
+import { CameraDetailPage } from '@/pages/camera-detail'
 import { WorkflowsPage } from '@/pages/workflows'
 import { EventsPage } from '@/pages/events'
 import { SettingsPage } from '@/pages/settings'
@@ -21,6 +22,7 @@ export const appRoutes = [
         children: [
           { index: true, element: <DashboardPage /> },
           { path: 'cameras', element: <CamerasPage /> },
+          { path: 'cameras/:id', element: <CameraDetailPage /> },
           { path: 'workflows', element: <WorkflowsPage /> },
           { path: 'events', element: <EventsPage /> },
           { path: 'settings', element: <SettingsPage /> },
