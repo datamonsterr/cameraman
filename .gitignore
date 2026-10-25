@@ -1,0 +1,51 @@
+# Rust
+/backend/target
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+.next/
+.expo/
+web-build/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Models / media (large)
+*.pt
+*.onnx
+*.engine
+/worker/models/*.pt
+/data/
+*.mp4
+*.mkv
+clips/
+snapshots/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Build / infra
+/infra/**/secrets/
+coverage/
+.railway/
+.vercel/
