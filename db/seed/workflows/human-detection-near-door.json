@@ -1,0 +1,64 @@
+{
+  "name": "human-detection-near-door",
+  "description": "Email when a person is detected near the door region (auto-calibrated landmark).",
+  "graph": {
+    "nodes": [
+      {
+        "id": "n_cam",
+        "type": "camera",
+        "position": {
+          "x": 40,
+          "y": 120
+        },
+        "config": {
+          "camera_id": "${CAMERA_ID}",
+          "fps": 10
+        }
+      },
+      {
+        "id": "n_code",
+        "type": "codeblock",
+        "position": {
+          "x": 340,
+          "y": 120
+        },
+        "config": {
+          "code": "\"\"\"Example Code Block: human detection near the door.\n\nSame injected API as human_detection.py. A landmark named \"door\" marks the door\nregion (a still object/area). This block fires only when a detected person overlaps\nthe (possibly auto-calibrated) door region, emailing an alert. The door landmark\nauto-calibrates in the worker as the region drifts (SPEC FR-14), so this logic keeps\nworking without manual re-drawing.\n\"\"\"\n\nmodel = get_model(config.get(\"model\", \"yolov8n\"))\ndets = model(frame, conf=0.4, classes=[0])  # person\n\ndoor = landmark.get(\"door\")  # current (auto-calibrated) door box, or None\nnear = 0\nfor d in dets:\n    at_door = door is not None and landmark.contains(\"door\", d.box)\n    color = (0, 0, 255) if at_door else (0, 255, 0)\n    draw.box(d.box, color=color, label=\"person@door\" if at_door else \"person\")\n    if at_door:\n        near += 1\n\nif door is not None:\n    draw.polygon(door, color=(255, 200, 0), label=\"door\")\n\nemit(\"persons_at_door\", near)\n\nif near > 0 and now() >= state.get(\"cooldown_until\", 0):\n    notify(\n        subject=f\"Human near the door on {camera.name}\",\n        body=f\"{near} person(s) detected near the door on {camera.name} at {ts()}.\",\n    )\n    state[\"cooldown_until\"] = now() + 60\n",
+          "model": "yolov8n"
+        }
+      },
+      {
+        "id": "n_email",
+        "type": "email",
+        "position": {
+          "x": 680,
+          "y": 120
+        },
+        "config": {
+          "to": [
+            "phamdat17092004@gmail.com"
+          ],
+          "subject": "Human near the door on {{camera}}",
+          "body": "{{body}}",
+          "cooldown_secs": 60
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "n_cam",
+        "sourceHandle": "frames",
+        "target": "n_code",
+        "targetHandle": "frames"
+      },
+      {
+        "id": "e2",
+        "source": "n_code",
+        "sourceHandle": "actions",
+        "target": "n_email",
+        "targetHandle": "trigger"
+      }
+    ]
+  }
+}

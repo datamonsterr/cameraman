@@ -1,0 +1,64 @@
+{
+  "name": "human-detection",
+  "description": "Detect people on a camera with YOLO and email on appearance.",
+  "graph": {
+    "nodes": [
+      {
+        "id": "n_cam",
+        "type": "camera",
+        "position": {
+          "x": 40,
+          "y": 120
+        },
+        "config": {
+          "camera_id": "${CAMERA_ID}",
+          "fps": 10
+        }
+      },
+      {
+        "id": "n_code",
+        "type": "codeblock",
+        "position": {
+          "x": 340,
+          "y": 120
+        },
+        "config": {
+          "code": "\"\"\"Example Code Block: human detection.\n\nInjected API (see SPEC FR-10 / worker codeblock runtime):\n  frame                      current frame, numpy BGR array\n  np, cv2, torch             libraries\n  get_model(name)            cached model loader -> Model\n  Model(frame, conf, classes)-> iterable of Detection(label, confidence, box, xyxy)\n  draw.box/text/mask/polygon annotate the outgoing stream\n  notify(subject, body, to)  emit an email action into the workflow\n  landmark.get/calibrate/contains\n  emit(key, value)           structured output to downstream nodes\n  state                      dict persisted across frames (per node)\n  camera                     .id, .name\n  now()/ts()/log()           helpers\n\nThis block detects people with YOLO, draws a green box on each, and emails on the\nfirst appearance (debounced by a 60s cooldown held in `state`).\n\"\"\"\n\nmodel = get_model(config.get(\"model\", \"yolov8n\"))\ndets = model(frame, conf=0.4, classes=[0])  # COCO class 0 = person\n\ncount = 0\nfor d in dets:\n    draw.box(d.box, color=(0, 255, 0), label=f\"person {d.confidence:.2f}\")\n    count += 1\n\nemit(\"person_count\", count)\n\nif count > 0 and now() >= state.get(\"cooldown_until\", 0):\n    notify(\n        subject=f\"Human detected on {camera.name}\",\n        body=f\"{count} person(s) detected on {camera.name} at {ts()}.\",\n    )\n    state[\"cooldown_until\"] = now() + 60\n",
+          "model": "yolov8n"
+        }
+      },
+      {
+        "id": "n_email",
+        "type": "email",
+        "position": {
+          "x": 680,
+          "y": 120
+        },
+        "config": {
+          "to": [
+            "phamdat17092004@gmail.com"
+          ],
+          "subject": "Human detected on {{camera}}",
+          "body": "{{body}}",
+          "cooldown_secs": 60
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "n_cam",
+        "sourceHandle": "frames",
+        "target": "n_code",
+        "targetHandle": "frames"
+      },
+      {
+        "id": "e2",
+        "source": "n_code",
+        "sourceHandle": "actions",
+        "target": "n_email",
+        "targetHandle": "trigger"
+      }
+    ]
+  }
+}

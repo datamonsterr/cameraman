@@ -1,0 +1,89 @@
+# Full local stack: `docker compose up`. GPU for the worker is optional (see worker profile).
+name: cameraman
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cameraman}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cameraman}
+      POSTGRES_DB: ${POSTGRES_DB:-cameraman}
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cameraman}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: infra/backend.Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cameraman}:${POSTGRES_PASSWORD:-cameraman}@postgres:5432/${POSTGRES_DB:-cameraman}
+      REDIS_URL: redis://redis:6379
+      BACKEND_BIND: 0.0.0.0:8080
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      RUST_LOG: ${RUST_LOG:-info,cameraman=debug}
+      SEED_ON_START: ${SEED_ON_START:-true}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-phamdat17092004@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin12345}
+    ports: ["8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/worker.Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-cameraman}:${POSTGRES_PASSWORD:-cameraman}@postgres:5432/${POSTGRES_DB:-cameraman}
+      REDIS_URL: redis://redis:6379
+      BACKEND_URL: http://backend:8080
+      MODEL_CACHE_DIR: /models
+      CODEBLOCK_CPU_SECONDS: ${CODEBLOCK_CPU_SECONDS:-5}
+      CODEBLOCK_MEM_MB: ${CODEBLOCK_MEM_MB:-1024}
+    depends_on:
+      backend: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - models:/models
+      - media:/media
+    # GPU: uncomment on a CUDA host (needs nvidia-container-toolkit)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/web.Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api/v1}
+        VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8080/api/v1}
+    ports: ["5173:80"]
+    depends_on:
+      backend: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  models:
+  media:
