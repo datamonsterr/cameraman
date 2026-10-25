@@ -73,12 +73,11 @@ jobs:
 
   publish-mobile-update:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: mobile } }
     steps:
       - uses: actions/checkout@v4
       - name: Guard
         id: guard
-        run: echo "ok=${{ secrets.EXPO_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+        run: echo "ok=${{ secrets.EXPO_TOKEN != '' && hashFiles('mobile/package.json') != '' }}" >> "$GITHUB_OUTPUT"
       - if: steps.guard.outputs.ok == 'true'
         uses: actions/setup-node@v4
         with: { node-version: '22' }
@@ -86,13 +85,15 @@ jobs:
         uses: pnpm/action-setup@v4
         with: { version: 9 }
       - if: steps.guard.outputs.ok == 'true'
+        working-directory: mobile
         run: pnpm install --frozen-lockfile
       - if: steps.guard.outputs.ok == 'true'
         name: EAS Update (OTA)
+        working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           npm i -g eas-cli
           eas update --branch production --message "${{ github.event.head_commit.message }}" --non-interactive
       - if: steps.guard.outputs.ok != 'true'
-        run: echo "EXPO_TOKEN not set; skipping mobile OTA update."
+        run: echo "EXPO_TOKEN/mobile not ready; skipping mobile OTA update."

@@ -69,7 +69,7 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --frozen --extra dev
+      - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run pytest -q
 
@@ -87,7 +87,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test --run
+      - run: pnpm test
       - run: pnpm build
 
   mobile:
@@ -104,4 +104,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test --run
+      - run: pnpm test
