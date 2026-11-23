@@ -5,14 +5,23 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   changes:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       worker: ${{ steps.filter.outputs.worker }}
@@ -31,8 +40,11 @@ jobs:
 
   backend:
     needs: changes
-    if: ${{ needs.changes.outputs.backend == 'true' }}
+    if: >-
+      !cancelled() && !failure() &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.backend == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:16-alpine
@@ -61,8 +73,11 @@ jobs:
 
   worker:
     needs: changes
-    if: ${{ needs.changes.outputs.worker == 'true' }}
+    if: >-
+      !cancelled() && !failure() &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.worker == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults: { run: { working-directory: worker } }
     steps:
       - uses: actions/checkout@v4
@@ -75,8 +90,11 @@ jobs:
 
   web:
     needs: changes
-    if: ${{ needs.changes.outputs.web == 'true' }}
+    if: >-
+      !cancelled() && !failure() &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.web == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults: { run: { working-directory: web } }
     steps:
       - uses: actions/checkout@v4
@@ -92,8 +110,11 @@ jobs:
 
   mobile:
     needs: changes
-    if: ${{ needs.changes.outputs.mobile == 'true' }}
+    if: >-
+      !cancelled() && !failure() &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.mobile == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults: { run: { working-directory: mobile } }
     steps:
       - uses: actions/checkout@v4
