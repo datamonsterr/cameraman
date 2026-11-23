@@ -1,22 +1,58 @@
 name: Deploy
 
-# CD: on green main, build images and deploy each service. Each job is guarded by
-# its required secret so the pipeline no-ops cleanly until infra is provisioned.
+# To retry production deployment, run CI manually on main.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: >-
+    ${{ github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+        'deploy-main' || format('deploy-skipped-{0}', github.run_id) }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  deploy-backend:
+  verify:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+    steps:
+      - name: Match the tested commit to current main
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          main_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')
+          if [[ "$main_sha" == "$CI_SHA" ]]; then
+            echo "sha=$CI_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "main has advanced. Skipping deployment of $CI_SHA."
+          fi
+
+  deploy-backend:
+    needs: verify
+    if: needs.verify.outputs.sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
       - name: Guard
         id: guard
         run: echo "ok=${{ secrets.RAILWAY_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
@@ -32,10 +68,16 @@ jobs:
         run: echo "RAILWAY_TOKEN not set; skipping backend deploy."
 
   deploy-worker:
+    needs: verify
+    if: needs.verify.outputs.sha != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
       - name: Guard
         id: guard
         run: echo "ok=${{ secrets.RAILWAY_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
@@ -49,11 +91,17 @@ jobs:
         run: echo "RAILWAY_TOKEN not set; skipping worker deploy."
 
   deploy-web:
+    needs: verify
+    if: needs.verify.outputs.sha != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: production
     defaults: { run: { working-directory: web } }
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
       - name: Guard
         id: guard
         run: echo "ok=${{ secrets.VERCEL_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
@@ -72,9 +120,15 @@ jobs:
         run: echo "VERCEL_TOKEN not set; skipping web deploy."
 
   publish-mobile-update:
+    needs: verify
+    if: needs.verify.outputs.sha != ''
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
       - name: Guard
         id: guard
         run: echo "ok=${{ secrets.EXPO_TOKEN != '' && hashFiles('mobile/package.json') != '' }}" >> "$GITHUB_OUTPUT"
@@ -92,8 +146,9 @@ jobs:
         working-directory: mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          DEPLOY_MESSAGE: ${{ github.event.workflow_run.head_commit.message }}
         run: |
           npm i -g eas-cli
-          eas update --branch production --message "${{ github.event.head_commit.message }}" --non-interactive
+          eas update --branch production --message "$DEPLOY_MESSAGE" --non-interactive
       - if: steps.guard.outputs.ok != 'true'
         run: echo "EXPO_TOKEN/mobile not ready; skipping mobile OTA update."
